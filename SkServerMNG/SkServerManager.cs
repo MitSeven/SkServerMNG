@@ -13,17 +13,17 @@ namespace SkServerMNG
     public class SkServerManager
     {
         private static Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        private Hashtable clientSockets = new Hashtable();
         private const int BUFFER_SIZE = 1024 * 32000;
         private static readonly byte[] buffer = new byte[BUFFER_SIZE];
-        public delegate void Changed(object T);
+        public delegate void Changed(object T, ModeEventArgs e);
         public event Changed ChangeEvent;
-        public object ExMessage;
-        public object ClientRequest;
-        public object ClientConnect;
-        public object ClientExit;
         public bool IsSKCreate { get; private set; } = false;
         public string IpServer { get; private set; } = "127.0.0.1";
+        public Hashtable ClientSockets { get; private set; } = new Hashtable();
+        public object ExMessage { get; private set; }
+        public object ClientRequest { get; private set; }
+        public object ClientConnect { get; private set; }
+        public object ClientExit { get; private set; }
 
         public bool SetupServer()
         {
@@ -42,7 +42,7 @@ namespace SkServerMNG
                 catch
                 {
                     ExMessage = "Không thể tạo Server!";
-                    ChangeEvent?.Invoke(ExMessage);
+                    ChangeEvent?.Invoke(ExMessage, new ModeEventArgs("ExMessage"));
                     return false;
                 }
             }
@@ -72,25 +72,37 @@ namespace SkServerMNG
         /// Close all connected client (we do not need to shutdown the server socket as its connections
         /// are already closed with the clients).
         /// </summary>
-        public void CloseAllSockets()
+        public bool CloseAllSockets()
         {
-            foreach (DictionaryEntry socket in clientSockets)
+            try
             {
-                Socket sk = socket.Value as Socket;
-                sk.Shutdown(SocketShutdown.Both);
-                sk.Close();
+                try
+                {
+                    foreach (DictionaryEntry socket in ClientSockets)
+                    {
+                        Socket sk = socket.Value as Socket;
+                        sk.Send(SerializeData("exit"));
+                        sk.Shutdown(SocketShutdown.Both);
+                        sk.Close();
+                    }
+                }
+                catch { }
+                IsSKCreate = false;
+                ClientSockets.Clear();
+                serverSocket.Close();
             }
-            IsSKCreate = false;
-            clientSockets.Clear();
-            serverSocket.Close();
+            catch
+            {
+                return false;
+            }
+            return true;
         }
         public bool RespondClientRq(object Object, string IpClient)
         {
-            Socket clientsk = clientSockets[IpClient] as Socket;
+            Socket clientsk = ClientSockets[IpClient] as Socket;
             try
             {
-                byte[] data = SerializeData(Object);
-                clientsk.Send(data);
+                clientsk.Send(SerializeData(Object));
                 return true;
             }
             catch
@@ -108,11 +120,11 @@ namespace SkServerMNG
             catch (ObjectDisposedException)
             {
                 ExMessage = "Mất kết nối!";
-                ChangeEvent?.Invoke(ExMessage);
+                ChangeEvent?.Invoke(ExMessage, new ModeEventArgs("ExMessage"));
                 return;
             }
-            clientSockets.Remove("127.0.0.1");
-            clientSockets.Add("127.0.0.1", socket);
+            ClientSockets.Remove("127.0.0.1");
+            ClientSockets.Add("127.0.0.1", socket);
             socket.BeginReceive(buffer, 0, BUFFER_SIZE, SocketFlags.None, ReceiveCallback, socket);
             serverSocket.BeginAccept(AcceptCallback, null);
         }
@@ -128,7 +140,8 @@ namespace SkServerMNG
                 }
                 else
                 {
-                    received = 1024 * 32000;
+                    received = 0;
+                    Array.Clear(buffer, 0, BUFFER_SIZE);
                 }
             }
             catch (SocketException)
@@ -136,21 +149,32 @@ namespace SkServerMNG
                 current.Close();
                 return;
             }
-
             byte[] recBuf = new byte[received];
             Array.Copy(buffer, recBuf, received);
             string text = DeserializeData(recBuf).ToString();
             string[] arrText = text.Split(new char[] { '&' }, 2);
-            switch (arrText.First())
+            CommandEx(arrText, current);//xử lý lệnh nhận được từ client
+            try
+            {
+                current.BeginReceive(buffer, 0, BUFFER_SIZE, SocketFlags.None, ReceiveCallback, current);
+            }
+            catch
+            {
+
+            }
+        }
+        private void CommandEx(string[] command, Socket current)
+        {
+            switch (command.First())
             {
                 case "ipclient":
                     {
                         Socket skUS = current;
-                        clientSockets.Remove(arrText[1]);
-                        clientSockets.Add(arrText[1], skUS);
-                        clientSockets.Remove("127.0.0.1");
-                        ClientConnect = arrText[1];
-                        ChangeEvent?.Invoke(ClientConnect);
+                        ClientSockets.Remove(command[1]);
+                        ClientSockets.Add(command[1], skUS);
+                        ClientSockets.Remove("127.0.0.1");
+                        ClientConnect = command[1];
+                        ChangeEvent?.Invoke(ClientConnect, new ModeEventArgs("ClientConnect"));
                         break;
                     }
                 case "exit":
@@ -162,23 +186,23 @@ namespace SkServerMNG
                             skUS.Close();
                         }
                         catch { }
-                        clientSockets.Remove(arrText[1]);
-                        ClientExit = arrText[1];
-                        ChangeEvent?.Invoke(ClientExit);
+                        ClientSockets.Remove(command[1]);
+                        ClientExit = command[1];
+                        ChangeEvent?.Invoke(ClientExit, new ModeEventArgs("ClientExit"));
                         return;
                     }
                 case "rcvrq":
                     {
                         Hashtable rqclient = new Hashtable();
-                        foreach (DictionaryEntry ipclient in clientSockets)
+                        foreach (DictionaryEntry ipclient in ClientSockets)
                         {
                             if (ipclient.Value == current)
                             {
                                 rqclient.Remove(ipclient.Key);
-                                rqclient.Add(ipclient.Key, arrText[1]);
+                                rqclient.Add(ipclient.Key, command[1]);
                             }
                         }
-                        byte[] data = SerializeData(RespondRequest(rqclient, arrText[1]));
+                        byte[] data = SerializeData(RespondRequest(rqclient, command[1]));
                         current.Send(data);
                         break;
                     }
@@ -187,14 +211,6 @@ namespace SkServerMNG
                         break;
                     }
             }
-            try
-            {
-                current.BeginReceive(buffer, 0, BUFFER_SIZE, SocketFlags.None, ReceiveCallback, current);
-            }
-            catch
-            {
-
-            }
         }
         private string RespondRequest(Hashtable Request, string Text)
         {
@@ -202,7 +218,7 @@ namespace SkServerMNG
             try
             {
                 ClientRequest = Request;
-                ChangeEvent?.Invoke(ClientRequest);
+                ChangeEvent?.Invoke(ClientRequest, new ModeEventArgs("ClientRequest"));
                 rsp = "Đã nhận được yêu cầu: " + Text;
             }
             catch { }
@@ -237,10 +253,9 @@ namespace SkServerMNG
         /// <returns></returns>
         private object DeserializeData(byte[] theByteArray)
         {
-            if (theByteArray.Length == 0)
+            if ((theByteArray.Length == 0))
             {
-
-                return null;
+                return "empty";
             }
             else
             {
@@ -282,5 +297,12 @@ namespace SkServerMNG
             }
             return output;
         }
+    }
+
+    public class ModeEventArgs
+    {
+        private string _mode;
+        public string Mode { get => _mode; set => _mode = value; }
+        public ModeEventArgs(string mode) => Mode = mode;
     }
 }
