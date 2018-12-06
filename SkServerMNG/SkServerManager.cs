@@ -15,6 +15,7 @@ namespace SkServerMNG
         private static Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         private const int BUFFER_SIZE = 1024 * 32000;
         private static readonly byte[] buffer = new byte[BUFFER_SIZE];
+        private int rdconnect=100;
         public delegate void Changed(object T, ModeEventArgs e);
         public event Changed ChangeEvent;
         public string IpServer
@@ -84,6 +85,7 @@ namespace SkServerMNG
                 IsSKCreate = false;
                 ClientSockets.Clear();
                 serverSocket.Close();
+                rdconnect = 100;
             }
             catch
             {
@@ -117,8 +119,9 @@ namespace SkServerMNG
                 ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.SocketMessage));
                 return;
             }
-            ClientSockets.Remove("127.0.0.1");
-            ClientSockets.Add("127.0.0.1", socket);
+            ClientSockets.Remove("user"+rdconnect.ToString());
+            ClientSockets.Add("user" + rdconnect.ToString(), socket);
+            rdconnect++;
             socket.BeginReceive(buffer, 0, BUFFER_SIZE, SocketFlags.None, ReceiveCallback, socket);
             serverSocket.BeginAccept(AcceptCallback, null);
         }
@@ -145,7 +148,7 @@ namespace SkServerMNG
             }
             byte[] recBuf = new byte[received];
             Array.Copy(buffer, recBuf, received);
-            string text = "";
+            object text = "";
             try
             {
                 text = DeserializeData(recBuf).ToString();
@@ -164,17 +167,18 @@ namespace SkServerMNG
 
             }
         }
-        private void CommandEx(string text, Socket current)
+        private void CommandEx(object text, Socket current)
         {
-            string[] command = text.Split(new char[] { '&' }, 2);
+            string[] command = text.ToString().Split(new char[] { '&' }, 2);
             switch (command.First())
             {
                 case "ipclient":
                     {
+                        int lastconn = rdconnect - 1;
                         Socket skUS = current;
                         ClientSockets.Remove(command[1]);
                         ClientSockets.Add(command[1], skUS);
-                        ClientSockets.Remove("127.0.0.1");
+                        ClientSockets.Remove("user"+lastconn.ToString());
                         exMessage = command[1];
                         ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.ClientConnect));
                         break;
@@ -212,7 +216,7 @@ namespace SkServerMNG
                     {
                         try
                         {
-                            byte[] data = System.Text.Encoding.ASCII.GetBytes("Request received: " + text);
+                            byte[] data = System.Text.Encoding.ASCII.GetBytes("Request received: " + text.ToString());
                             current.Send(data);
                         }
                         catch { }
@@ -263,7 +267,7 @@ namespace SkServerMNG
         {
             if ((theByteArray.Length == 0))
             {
-                return "empty";
+                return null;
             }
             else
             {
