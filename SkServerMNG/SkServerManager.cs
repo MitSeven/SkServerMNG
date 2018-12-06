@@ -17,14 +17,30 @@ namespace SkServerMNG
         private static readonly byte[] buffer = new byte[BUFFER_SIZE];
         public delegate void Changed(object T, ModeEventArgs e);
         public event Changed ChangeEvent;
+        public string IpServer
+        {
+            get
+            {
+                string IP_current;
+                try
+                {
+                    IP_current = GetLocalIPv4(NetworkInterfaceType.Ethernet);
+                    if (string.IsNullOrEmpty(IP_current))
+                    {
+                        IP_current = GetLocalIPv4(NetworkInterfaceType.Wireless80211);
+                    }
+                }
+                catch
+                {
+                    IP_current = "127.0.0.1";
+                }
+                return IP_current;
+            }
+            private set { }
+        }
         public bool IsSKCreate { get; private set; } = false;
-        public string IpServer { get; private set; } = "127.0.0.1";
         public Hashtable ClientSockets { get; private set; } = new Hashtable();
-        public object ExMessage { get; private set; }
-        public object ClientRequest { get; private set; }
-        public object ClientConnect { get; private set; }
-        public object ClientExit { get; private set; }
-
+        private object exMessage;
         public bool SetupServer()
         {
             if (!serverSocket.Connected)
@@ -35,14 +51,13 @@ namespace SkServerMNG
                     serverSocket.Bind(new IPEndPoint(IPAddress.Any, 777));
                     serverSocket.Listen(0);
                     serverSocket.BeginAccept(AcceptCallback, null);
-                    IpServer = GetIpServer();
                     IsSKCreate = true;
                     return true;
                 }
                 catch
                 {
-                    ExMessage = "Không thể tạo Server!";
-                    ChangeEvent?.Invoke(ExMessage, new ModeEventArgs("ExMessage"));
+                    exMessage = "Cannot create Server!";
+                    ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.SocketMessage));
                     return false;
                 }
             }
@@ -51,27 +66,6 @@ namespace SkServerMNG
                 return true;
             }
         }
-        private string GetIpServer()
-        {
-            string IP_current;
-            try
-            {
-                IP_current = GetLocalIPv4(NetworkInterfaceType.Ethernet);
-                if (string.IsNullOrEmpty(IP_current))
-                {
-                    IP_current = GetLocalIPv4(NetworkInterfaceType.Wireless80211);
-                }
-            }
-            catch
-            {
-                IP_current = "127.0.0.1";
-            }
-            return IP_current;
-        }
-        /// <summary>
-        /// Close all connected client (we do not need to shutdown the server socket as its connections
-        /// are already closed with the clients).
-        /// </summary>
         public bool CloseAllSockets()
         {
             try
@@ -81,7 +75,7 @@ namespace SkServerMNG
                     foreach (DictionaryEntry socket in ClientSockets)
                     {
                         Socket sk = socket.Value as Socket;
-                        sk.Send(SerializeData("exit"));
+                        sk.Send(SerializeData("exit&Server Closed"));
                         sk.Shutdown(SocketShutdown.Both);
                         sk.Close();
                     }
@@ -119,8 +113,8 @@ namespace SkServerMNG
             }
             catch (ObjectDisposedException)
             {
-                ExMessage = "Mất kết nối!";
-                ChangeEvent?.Invoke(ExMessage, new ModeEventArgs("ExMessage"));
+                exMessage = "Lost connect!";
+                ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.SocketMessage));
                 return;
             }
             ClientSockets.Remove("127.0.0.1");
@@ -151,9 +145,16 @@ namespace SkServerMNG
             }
             byte[] recBuf = new byte[received];
             Array.Copy(buffer, recBuf, received);
-            string text = DeserializeData(recBuf).ToString();
-            string[] arrText = text.Split(new char[] { '&' }, 2);
-            CommandEx(arrText, current);//xử lý lệnh nhận được từ client
+            string text = "";
+            try
+            {
+                text = DeserializeData(recBuf).ToString();
+            }
+            catch
+            {
+                text = System.Text.Encoding.ASCII.GetString(recBuf);
+            }
+            CommandEx(text, current);//xử lý lệnh nhận được từ client
             try
             {
                 current.BeginReceive(buffer, 0, BUFFER_SIZE, SocketFlags.None, ReceiveCallback, current);
@@ -163,8 +164,9 @@ namespace SkServerMNG
 
             }
         }
-        private void CommandEx(string[] command, Socket current)
+        private void CommandEx(string text, Socket current)
         {
+            string[] command = text.Split(new char[] { '&' }, 2);
             switch (command.First())
             {
                 case "ipclient":
@@ -173,8 +175,8 @@ namespace SkServerMNG
                         ClientSockets.Remove(command[1]);
                         ClientSockets.Add(command[1], skUS);
                         ClientSockets.Remove("127.0.0.1");
-                        ClientConnect = command[1];
-                        ChangeEvent?.Invoke(ClientConnect, new ModeEventArgs("ClientConnect"));
+                        exMessage = command[1];
+                        ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.ClientConnect));
                         break;
                     }
                 case "exit":
@@ -187,39 +189,45 @@ namespace SkServerMNG
                         }
                         catch { }
                         ClientSockets.Remove(command[1]);
-                        ClientExit = command[1];
-                        ChangeEvent?.Invoke(ClientExit, new ModeEventArgs("ClientExit"));
+                        exMessage = command[1];
+                        ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.ClientExit));
                         return;
                     }
                 case "rcvrq":
                     {
-                        Hashtable rqclient = new Hashtable();
+                        DictionaryEntry rqclient = new DictionaryEntry();
                         foreach (DictionaryEntry ipclient in ClientSockets)
                         {
                             if (ipclient.Value == current)
                             {
-                                rqclient.Remove(ipclient.Key);
-                                rqclient.Add(ipclient.Key, command[1]);
+                                rqclient.Key = ipclient.Key;
+                                rqclient.Value = command[1];
                             }
                         }
-                        byte[] data = SerializeData(RespondRequest(rqclient, command[1]));
+                        byte[] data = SerializeData(RespondRequest(rqclient));
                         current.Send(data);
                         break;
                     }
                 default:
                     {
+                        try
+                        {
+                            byte[] data = System.Text.Encoding.ASCII.GetBytes("Request received: " + text);
+                            current.Send(data);
+                        }
+                        catch { }
                         break;
                     }
             }
         }
-        private string RespondRequest(Hashtable Request, string Text)
+        private string RespondRequest(DictionaryEntry Request)
         {
-            string rsp = "Không xác định được yêu cầu!";
+            string rsp = "Request empty!";
             try
             {
-                ClientRequest = Request;
-                ChangeEvent?.Invoke(ClientRequest, new ModeEventArgs("ClientRequest"));
-                rsp = "Đã nhận được yêu cầu: " + Text;
+                exMessage = Request;
+                ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.ClientRequest));
+                rsp = "Request received: " + Request.Value.ToString();
             }
             catch { }
             return rsp;
@@ -301,8 +309,15 @@ namespace SkServerMNG
 
     public class ModeEventArgs
     {
-        private string _mode;
-        public string Mode { get => _mode; set => _mode = value; }
-        public ModeEventArgs(string mode) => Mode = mode;
+        private int _mode;
+        public int Mode { get => _mode; set => _mode = value; }
+        public ModeEventArgs(int mode) => Mode = mode;
+    }
+    public enum ModeEvent
+    {
+        SocketMessage,
+        ClientConnect,
+        ClientExit,
+        ClientRequest,
     }
 }
