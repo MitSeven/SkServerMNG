@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -42,63 +42,85 @@ namespace SkServerMNG
         public bool IsSKCreate { get; private set; } = false;
         public Hashtable ClientSockets { get; private set; } = new Hashtable();
         private object exMessage;
-        public bool SetupServer()
+        public bool SetupServer
         {
-            if (!serverSocket.Connected)
+            get
             {
-                serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                try
+                if (!serverSocket.Connected)
                 {
-                    serverSocket.Bind(new IPEndPoint(IPAddress.Any, 777));
-                    serverSocket.Listen(0);
-                    serverSocket.BeginAccept(AcceptCallback, null);
-                    IsSKCreate = true;
+                    serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                    try
+                    {
+                        serverSocket.Bind(new IPEndPoint(IPAddress.Any, 777));
+                        serverSocket.Listen(0);
+                        serverSocket.BeginAccept(AcceptCallback, null);
+                        IsSKCreate = true;
+                        return true;
+                    }
+                    catch
+                    {
+                        exMessage = "Cannot create Server!";
+                        ChangeEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.SocketMessage));
+                        IsSKCreate = false;
+                        return false;
+                    }
+                }
+                else
+                {
                     return true;
                 }
-                catch
-                {
-                    exMessage = "Cannot create Server!";
-                    ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.SocketMessage));
-                    return false;
-                }
-            }
-            else
-            {
-                return true;
             }
         }
-        public bool CloseAllSockets()
+        public bool CloseAllSockets
         {
-            try
+            get
             {
+                IsSKCreate = false;
+                rdconnect = 100;
                 try
                 {
                     foreach (DictionaryEntry socket in ClientSockets)
                     {
-                        Socket sk = socket.Value as Socket;
-                        sk.Send(SerializeData("exit&Server Closed"));
-                        sk.Shutdown(SocketShutdown.Both);
-                        sk.Close();
+                        try
+                        {
+                            Socket sk = socket.Value as Socket;
+                            SendtoClient(new KeyValuePair<TypeSend, object>(TypeSend.Exit, null), sk);
+                            sk.Shutdown(SocketShutdown.Both);
+                            sk.Close();
+                        }
+                        catch { }
                     }
                 }
                 catch { }
-                IsSKCreate = false;
-                ClientSockets.Clear();
-                serverSocket.Close();
-                rdconnect = 100;
+                try
+                {
+                    ClientSockets.Clear();
+                    serverSocket.Close();
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        }
+        public bool RespondClient(object Object, string IpClient)
+        {
+            try
+            {
+                Socket clientsk = ClientSockets[IpClient] as Socket;
+                return SendtoClient(new KeyValuePair<TypeSend, object>(TypeSend.Respond, Object), clientsk);
             }
             catch
             {
                 return false;
             }
-            return true;
         }
-        public bool RespondClientRq(object Object, string IpClient)
+        private bool SendtoClient(KeyValuePair<TypeSend, object> keyValuePair, Socket socket)
         {
-            Socket clientsk = ClientSockets[IpClient] as Socket;
             try
             {
-                clientsk.Send(SerializeData(Object));
+                socket.Send(SerializeData(keyValuePair));
                 return true;
             }
             catch
@@ -148,7 +170,7 @@ namespace SkServerMNG
             }
             byte[] recBuf = new byte[received];
             Array.Copy(buffer, recBuf, received);
-            object text = "";
+            object text = null;
             try
             {
                 text = DeserializeData(recBuf).ToString();
@@ -162,85 +184,71 @@ namespace SkServerMNG
             {
                 current.BeginReceive(buffer, 0, BUFFER_SIZE, SocketFlags.None, ReceiveCallback, current);
             }
-            catch
-            {
-
-            }
+            catch { }
         }
         private void CommandEx(object text, Socket current)
         {
-            string[] command = text.ToString().Split(new char[] { '&' }, 2);
-            switch (command.First())
-            {
-                case "ipclient":
-                    {
-                        int lastconn = rdconnect - 1;
-                        Socket skUS = current;
-                        ClientSockets.Remove(command[1]);
-                        ClientSockets.Add(command[1], skUS);
-                        ClientSockets.Remove("user"+lastconn.ToString());
-                        exMessage = command[1];
-                        ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.ClientConnect));
-                        break;
-                    }
-                case "exit":
-                    {
-                        Socket skUS = current;
-                        try
-                        {
-                            skUS.Shutdown(SocketShutdown.Both);
-                            skUS.Close();
-                        }
-                        catch { }
-                        ClientSockets.Remove(command[1]);
-                        exMessage = command[1];
-                        ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.ClientExit));
-                        return;
-                    }
-                case "rcvrq":
-                    {
-                        DictionaryEntry rqclient = new DictionaryEntry();
-                        foreach (DictionaryEntry ipclient in ClientSockets)
-                        {
-                            if (ipclient.Value == current)
-                            {
-                                rqclient.Key = ipclient.Key;
-                                rqclient.Value = command[1];
-                            }
-                        }
-                        byte[] data = SerializeData(RespondRequest(rqclient));
-                        current.Send(data);
-                        break;
-                    }
-                default:
-                    {
-                        try
-                        {
-                            byte[] data = System.Text.Encoding.ASCII.GetBytes("Request received: " + text.ToString());
-                            current.Send(data);
-                        }
-                        catch { }
-                        break;
-                    }
-            }
-        }
-        private string RespondRequest(DictionaryEntry Request)
-        {
-            string rsp = "Request empty!";
             try
             {
-                exMessage = Request;
-                ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.ClientRequest));
-                rsp = "Request received: " + Request.Value.ToString();
+                KeyValuePair<TypeReceived, object> command = (KeyValuePair<TypeReceived, object>)text;
+                switch (command.Key)
+                {
+                    case TypeReceived.IpAdress:
+                        {
+                            int lastconn = rdconnect - 1;
+                            Socket skUS = current;
+                            ClientSockets.Remove(command.Value);
+                            ClientSockets.Add(command.Value, skUS);
+                            ClientSockets.Remove("user" + lastconn.ToString());
+                            exMessage = command.Value;
+                            ChangeEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.ClientConnect));
+                            break;
+                        }
+                    case TypeReceived.Exit:
+                        {
+                            Socket skUS = current;
+                            try
+                            {
+                                skUS.Shutdown(SocketShutdown.Both);
+                                skUS.Close();
+                            }
+                            catch { }
+                            ClientSockets.Remove(command.Value);
+                            exMessage = command.Value;
+                            ChangeEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.ClientExit));
+                            return;
+                        }
+                    case TypeReceived.Object:
+                        {
+                            KeyValuePair<string, object> rqclient=new KeyValuePair<string, object>();
+                            foreach (DictionaryEntry ipclient in ClientSockets)
+                            {
+                                if (ipclient.Value == current)
+                                {
+                                    rqclient = new KeyValuePair<string, object>(ipclient.Key.ToString(),command.Value);
+                                }
+                            }
+                            exMessage = rqclient;
+                            ChangeEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.ClientRequest));
+                            SendtoClient(new KeyValuePair<TypeSend, object>(TypeSend.Received, "Received: " + command.Value.ToString()), current);
+                            break;
+                        }
+                    default:
+                        {
+                            break;
+                        }
+                }
             }
-            catch { }
-            return rsp;
+            catch
+            {
+                try
+                {
+                    byte[] data = System.Text.Encoding.ASCII.GetBytes("Received: " + text.ToString());
+                    current.Send(data);
+                }
+                catch { }
+            }
         }
-        /// <summary>
-        /// Nén đối tượng thành mảng byte[]
-        /// </summary>
-        /// <param name="o"></param>
-        /// <returns></returns>
         private byte[] SerializeData(Object o)
         {
             try
@@ -257,12 +265,6 @@ namespace SkServerMNG
                 return new byte[0];
             }
         }
-
-        /// <summary>
-        /// Giải nén mảng byte[] thành đối tượng object
-        /// </summary>
-        /// <param name="theByteArray"></param>
-        /// <returns></returns>
         private object DeserializeData(byte[] theByteArray)
         {
             if ((theByteArray.Length == 0))
@@ -286,11 +288,6 @@ namespace SkServerMNG
                 }
             }
         }
-        /// <summary>
-        /// Lấy ra IP V4 của card mạng đang dùng
-        /// </summary>
-        /// <param name="_type"></param>
-        /// <returns></returns>
         private string GetLocalIPv4(NetworkInterfaceType _type)
         {
             string output = "";
@@ -310,12 +307,11 @@ namespace SkServerMNG
             return output;
         }
     }
-
     public class ModeEventArgs
     {
-        private int _mode;
-        public int Mode { get => _mode; set => _mode = value; }
-        public ModeEventArgs(int mode) => Mode = mode;
+        private ModeEvent _mode;
+        public ModeEvent ModeEvent { get => _mode; set => _mode = value; }
+        public ModeEventArgs(ModeEvent mode) => ModeEvent = mode;
     }
     public enum ModeEvent
     {
@@ -323,5 +319,17 @@ namespace SkServerMNG
         ClientConnect,
         ClientExit,
         ClientRequest,
+    }
+    public enum TypeReceived
+    {
+        IpAdress,
+        Exit,
+        Object,
+    }
+    public enum TypeSend
+    {
+        Exit,
+        Respond,
+        Received,
     }
 }
