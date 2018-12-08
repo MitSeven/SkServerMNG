@@ -42,66 +42,62 @@ namespace SkServerMNG
         public bool IsSKCreate { get; private set; } = false;
         public Hashtable ClientSockets { get; private set; } = new Hashtable();
         private object exMessage;
-        public bool SetupServer
+
+        public bool GetSetupServer()
         {
-            get
+            if (!serverSocket.Connected)
             {
-                if (!serverSocket.Connected)
-                {
-                    serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                    try
-                    {
-                        serverSocket.Bind(new IPEndPoint(IPAddress.Any, 777));
-                        serverSocket.Listen(0);
-                        serverSocket.BeginAccept(AcceptCallback, null);
-                        IsSKCreate = true;
-                        return true;
-                    }
-                    catch
-                    {
-                        exMessage = "Cannot create Server!";
-                        ChangeEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.SocketMessage));
-                        IsSKCreate = false;
-                        return false;
-                    }
-                }
-                else
-                {
-                    return true;
-                }
-            }
-        }
-        public bool CloseAllSockets
-        {
-            get
-            {
-                IsSKCreate = false;
-                rdconnect = 100;
+                serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 try
                 {
-                    foreach (DictionaryEntry socket in ClientSockets)
-                    {
-                        try
-                        {
-                            Socket sk = socket.Value as Socket;
-                            SendtoClient(new KeyValuePair<TypeSend, object>(TypeSend.Exit, null), sk);
-                            sk.Shutdown(SocketShutdown.Both);
-                            sk.Close();
-                        }
-                        catch { }
-                    }
-                }
-                catch { }
-                try
-                {
-                    ClientSockets.Clear();
-                    serverSocket.Close();
+                    serverSocket.Bind(new IPEndPoint(IPAddress.Any, 777));
+                    serverSocket.Listen(0);
+                    serverSocket.BeginAccept(AcceptCallback, null);
+                    IsSKCreate = true;
                     return true;
                 }
                 catch
                 {
+                    exMessage = "Cannot create Server!";
+                    ChangeEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.SocketMessage));
+                    IsSKCreate = false;
                     return false;
                 }
+            }
+            else
+            {
+                return true;
+            }
+        }
+
+        public bool GetCloseAllSockets()
+        {
+            IsSKCreate = false;
+            rdconnect = 100;
+            try
+            {
+                foreach (DictionaryEntry socket in ClientSockets)
+                {
+                    try
+                    {
+                        Socket sk = socket.Value as Socket;
+                        SendtoClient(new KeyValuePair<TypeSend, object>(TypeSend.Exit, null), sk);
+                        sk.Shutdown(SocketShutdown.Both);
+                        sk.Close();
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            try
+            {
+                ClientSockets.Clear();
+                serverSocket.Close();
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
         public bool RespondClient(object Object, string IpClient)
