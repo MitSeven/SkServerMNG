@@ -49,21 +49,26 @@ namespace SkServerMNG
                 serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 try
                 {
+                    AbortSend = false;
                     serverSocket.Bind(new IPEndPoint(IPAddress.Any, 777));
                     serverSocket.Listen(0);
                     serverSocket.BeginAccept(AcceptCallback, null);
                     IsSKCreate = true;
+                    exMessage = "Server created!";
+                    ReceivedEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.SocketMessage));
                     return true;
                 }
                 catch
                 {
                     exMessage = "Cannot create Server!";
-                    ReceivedEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.SocketMessage));
+                    ReceivedEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.SocketMessage));
                     return false;
                 }
             }
             else
             {
+                exMessage = "Server created!";
+                ReceivedEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.SocketMessage));
                 return true;
             }
         }
@@ -83,7 +88,6 @@ namespace SkServerMNG
                     }
                 }
                 catch { }
-                AbortSend = false;
                 IsSKCreate = false;
                 ClientSockets.Clear();
                 serverSocket.Close();
@@ -147,7 +151,7 @@ namespace SkServerMNG
                 if (!AbortSend)
                 {
                     exMessage = "Lost connect!";
-                    ReceivedEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.SocketMessage));
+                    ReceivedEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.SocketMessage));
                 }
                 return;
             }
