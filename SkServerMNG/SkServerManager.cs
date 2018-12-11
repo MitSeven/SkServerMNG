@@ -16,7 +16,7 @@ namespace SkServerMNG
         private static readonly byte[] buffer = new byte[BUFFER_SIZE];
         private int rdconnect = 100;
         public delegate void Changed(object T, ModeEventArgs e);
-        public event Changed ChangeEvent;
+        public event Changed ReceivedEvent;
         public string IpServer
         {
             get
@@ -58,7 +58,7 @@ namespace SkServerMNG
                 catch
                 {
                     exMessage = "Cannot create Server!";
-                    ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.SocketMessage));
+                    ReceivedEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.SocketMessage));
                     return false;
                 }
             }
@@ -89,7 +89,7 @@ namespace SkServerMNG
                 serverSocket.Close();
                 rdconnect = 100;
                 exMessage = "Server closed!";
-                ChangeEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.SocketMessage));
+                ReceivedEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.SocketMessage));
             }
             catch
             {
@@ -128,7 +128,7 @@ namespace SkServerMNG
                 if (!AbortSend)
                 {
                     exMessage = "Lost connect from client!";
-                    ChangeEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.ClientExit));
+                    ReceivedEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.ClientExit));
                 }
                 socket.Close();
                 return false;
@@ -147,7 +147,7 @@ namespace SkServerMNG
                 if (!AbortSend)
                 {
                     exMessage = "Lost connect!";
-                    ChangeEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.SocketMessage));
+                    ReceivedEvent?.Invoke(exMessage, new ModeEventArgs((int)ModeEvent.SocketMessage));
                 }
                 return;
             }
@@ -215,7 +215,7 @@ namespace SkServerMNG
                             ClientSockets.Add(cmd.Value.ToString(), skUS);
                             ClientSockets.Remove("user" + lastconn.ToString());
                             exMessage = cmd.Value;
-                            ChangeEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.ClientConnect));
+                            ReceivedEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.ClientConnect));
                             break;
                         }
                     case DataType.Exit:
@@ -229,7 +229,7 @@ namespace SkServerMNG
                             catch { }
                             ClientSockets.Remove(cmd.Value.ToString());
                             exMessage = cmd.Value;
-                            ChangeEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.ClientExit));
+                            ReceivedEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.ClientExit));
                             return;
                         }
                     case DataType.Object:
@@ -245,7 +245,7 @@ namespace SkServerMNG
                             }
 
                             exMessage = rqclient;
-                            ChangeEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.ClientRequest));
+                            ReceivedEvent?.Invoke(exMessage, new ModeEventArgs(ModeEvent.ClientRequest));
                             SendtoClient(new DictionaryEntry(DataType.Received, cmd.Value), current);
                             break;
                         }
